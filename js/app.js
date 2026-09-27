@@ -57,7 +57,7 @@ custom=custom.map(normalizeRole);
 const S={
  screen:"home",players:[],roles:[...BASE,...custom],counts:{},assign:{},reveal:0,
  phase:"",actions:{},votes:{},results:[],winner:null,turn:0,
- sealed:{},pendingDeath:[],gameStarted:false,justRevived:{},revivedThisNight:[]
+ sealed:{},pendingDeath:[],gameStarted:false,justRevived:{},revivedThisNight:[],assignCounts:{"村人陣営":0,"人狼陣営":0,"第三陣営":0}
 };
 
 function normalizeRole(r){
@@ -75,7 +75,7 @@ function pname(id){return (S.players.find(p=>p.id===id)||{}).name||"不明"}
 function teamClass(t){return t==="人狼陣営"?"red":t==="村人陣営"?"blue":"gold"}
 function shell(t,b){app.innerHTML=`<div class="container"><h1>${t}</h1>${b}</div>`}
 function go(x){S.screen=x;render()}
-function render(){({home,players,roles,dist,game,custom:customScreen,result}[S.screen]||home)()}
+function render(){({home,players,roles,dist,game,custom:customScreen,help,assign,result}[S.screen]||home)()}
 
 function home(){
  shell("🐺 人狼メーカー V4.0",`
@@ -83,14 +83,18 @@ function home(){
  <div class="card grid">
   <button id="new">ゲームを作る</button>
   <button class="secondary" id="edit">オリジナル役職を作る</button>
+  <button class="secondary" id="help">📖 遊び方・ヘルプ</button>
+  <button class="secondary" id="assign">🃏 アサイン（闇鍋）</button>
  </div>
  <div class="card">
-  <h3>V4.0：対立襲撃陣営判定＋オフライン/PWA</h3>
-  <p>オリジナル役職を「発動タイミング × 能力 × 対象 × 使用制限」で作れるようにしました。</p>
-  <p class="muted small">まずは限られたパーツで試運転し、足りない能力を後から追加していく方針です。</p>
+  <h3>V4.1.0：ヘルプ＋アサイン配役＋投票数修正</h3>
+  <p>オリジナル役職を「発動タイミング × 能力 × 対象 × 使用制限」で作れます。</p>
+  <p class="muted small">通常配役と、陣営だけ決めて役職をランダムにするアサイン配役に対応しています。</p>
  </div>`);
- document.getElementById("new").onclick=()=>{S.players=[];S.counts={};S.assign={};S.winner=null;S.gameStarted=false;go("players")};
+ document.getElementById("new").onclick=()=>{S.players=[];S.counts={};S.assign={};S.winner=null;S.gameStarted=false;S.assignCounts={"村人陣営":0,"人狼陣営":0,"第三陣営":0};go("players")};
  document.getElementById("edit").onclick=()=>go("custom");
+ document.getElementById("help").onclick=()=>go("help");
+ document.getElementById("assign").onclick=()=>go("assign");
 }
 
 function players(){
@@ -129,10 +133,24 @@ function roles(){
  <p class="muted">陣営ごとにまとめています。合計を${S.players.length}人にしてください。</p>
  <div class="card">${groupHtml}</div>
  <p>現在 <b>${total}</b> / ${S.players.length}人</p>
- <div class="row"><button class="secondary" id="back">戻る</button><button id="start" ${total!==S.players.length?"disabled":""}>役職配布へ</button></div>`);
+ <div class="row"><button class="secondary" id="back">戻る</button><button class="secondary" id="assign">🃏 アサイン配役</button><button id="start" ${total!==S.players.length?"disabled":""}>役職配布へ</button></div>`);
  document.querySelectorAll("[data-role]").forEach(x=>x.onchange=()=>{S.counts[x.dataset.role]=Math.max(0,+x.value||0);roles()});
  document.getElementById("back").onclick=()=>go("players");
- document.getElementById("start").onclick=()=>{let pool=[];for(const [id,n] of Object.entries(S.counts))for(let i=0;i<n;i++)pool.push(id);for(let i=pool.length-1;i;i--){let j=Math.floor(Math.random()*(i+1));[pool[i],pool[j]]=[pool[j],pool[i]]}S.players.forEach((p,i)=>S.assign[p.id]=pool[i]);S.reveal=0;S.turn=0;S.phase="";S.actions={};S.votes={};S.results=[];S.winner=null;S.justRevived={};S.revivedThisNight=[];go("dist")};
+ document.getElementById("assign").onclick=()=>go("assign");
+ document.getElementById("start").onclick=()=>{
+   let pool=[];for(const [id,n] of Object.entries(S.counts))for(let i=0;i<n;i++)pool.push(id);
+   shuffle(pool);startWithPool(pool);
+ };
+}
+
+function shuffle(a){for(let i=a.length-1;i>0;i--){let j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a}
+function startWithPool(pool){
+ S.players.forEach((p,i)=>{
+   S.assign[p.id]=pool[i];
+   p.voteBonus=(role(p.id)?.abilities||[]).filter(a=>a.effect==="vote_weight_plus").length;
+   p.alive=true;
+ });
+ S.reveal=0;S.turn=0;S.phase="";S.actions={};S.votes={};S.results=[];S.winner=null;S.justRevived={};S.revivedThisNight=[];go("dist");
 }
 function dist(){
  if(S.reveal>=S.players.length){
@@ -255,10 +273,91 @@ function showSequentialNotices(notes,onDone){
  showNotice(n.title,`<div class="muted small">${esc(n.player.name)}さん本人のみ確認してください。</div><div style="margin-top:14px">${n.html}</div>`,()=>showSequentialNotices(notes,onDone));
 }
 
+
+function help(){
+ shell("📖 遊び方・ヘルプ",`
+ <div class="card">
+  <h3>🎮 基本の遊び方</h3>
+  <ol>
+   <li><b>プレイヤー登録</b>で参加者を追加します。3人以上で開始できます。</li>
+   <li><b>配役設定</b>で各役職の人数を決めます。合計人数を参加者数に合わせます。</li>
+   <li><b>役職確認</b>で1人ずつ自分の役職を確認します。画面は本人だけ見てください。</li>
+   <li><b>夜</b>は表示されたプレイヤーが順番に自分の能力を処理します。能力がない人も「夜の行動を終了」を押します。</li>
+   <li><b>昼</b>に結果を確認して会議を行い、<b>投票</b>で生存者から1人を選びます。</li>
+   <li>処刑結果を処理したら次の夜へ進み、勝利条件を満たすまで繰り返します。</li>
+  </ol>
+  <p class="muted small">人狼メーカーはGMの代わりに進行処理を行います。ゲーム中は、画面に表示された人だけが操作してください。</p>
+ </div>
+
+ <div class="card">
+  <h3>⚙️ オリジナル役職の作り方</h3>
+  <p>役職は <b>陣営 ＋ 能力 ＋ 勝利条件</b> の組み合わせで作ります。</p>
+  <div class="notice"><b>① 発動タイミング</b><br>「夜」「ゲーム開始時」「投票時」「処刑時」「死亡時」から選びます。</div>
+  <div class="notice"><b>② 能力</b><br>襲撃、占い、護衛、蘇生、道連れ、能力封印、自己脱落などから選びます。<br><span class="muted small">「投票数を+1」はパッシブ能力なので、ゲーム中は自動で効果が適用されます。</span></div>
+  <div class="notice"><b>③ 対象</b><br>自分、生存者、死亡者、ランダム対象、全員などから選びます。</div>
+  <div class="notice"><b>④ 使用制限</b><br>「無制限」「1回」「2回」「3回」から選びます。夜の能力は、無制限でも同じ夜に同じ能力を何度も選ぶことはできません。</div>
+  <p><b>作成例：占い師</b></p>
+  <div class="card">発動：夜<br>能力：陣営を調査<br>対象：生存者1人<br>使用制限：無制限</div>
+  <p class="muted small">第三陣営は勝利条件と「勝利判定優先度」も設定できます。優先度が高い勝利条件ほど優先して判定されます。</p>
+ </div>
+
+ <div class="card">
+  <h3>🃏 アサイン（闇鍋）</h3>
+  <p>陣営ごとの人数だけを決め、実際の役職はその陣営の中からランダムに選びます。</p>
+  <p>例：<b>人狼陣営1・村人陣営4・第三陣営1</b>なら、合計6人をその構成にしてアサインします。</p>
+  <p class="muted small">同じ役職が複数人に選ばれることがあります。また、人狼陣営に狂人系しか残らない設定などでは、通常の人狼ゲームと異なる展開になるので注意してください。</p>
+ </div>
+
+ <div class="row"><button class="secondary" id="home">ホームへ</button><button id="custom">オリジナル役職を作る</button></div>`);
+ document.getElementById("home").onclick=()=>go("home");
+ document.getElementById("custom").onclick=()=>go("custom");
+}
+
+function assign(){
+ const teams=[
+  ["村人陣営","blue","村人側の人数"],
+  ["人狼陣営","red","人狼側の人数"],
+  ["第三陣営","gold","第三陣営の人数"]
+ ];
+ const total=teams.reduce((sum,[team])=>sum+(+S.assignCounts[team]||0),0);
+ const available=Object.fromEntries(teams.map(([team])=>[team,S.roles.filter(r=>r.team===team)]));
+ const missing=teams.filter(([team])=>(+S.assignCounts[team]||0)>0&&!available[team].length).map(([team])=>team);
+
+ shell("🃏 アサイン（闇鍋）",`
+ <div class="card">
+  <p>陣営ごとの人数だけ決めると、各陣営の役職をランダムに割り当てます。</p>
+  <p class="muted small">役職は陣営内からランダム抽選・重複あり。保存済みのオリジナル役職も対象です。</p>
+  ${teams.map(([team,cls,label])=>`
+   <div class="role ${cls}">
+    <div class="desc"><b>${team}</b><div class="muted small">${label} / 使用可能な役職 ${available[team].length}種</div></div>
+    <input data-ac="${team}" type="number" min="0" max="${S.players.length}" value="${+S.assignCounts[team]||0}" aria-label="${team}の人数">
+   </div>`).join("")}
+ </div>
+ <div class="card center">
+  <p>現在 <b>${total}</b> / ${S.players.length}人</p>
+  ${missing.length?`<p class="muted">⚠️ ${missing.join("・")}には使用できる役職がありません。</p>`:""}
+  <p class="muted small">例：6人なら「村人4・人狼1・第三1」で闇鍋配役にできます。</p>
+ </div>
+ <div class="row"><button class="secondary" id="back">配役設定へ</button><button id="startAssign" ${total!==S.players.length||missing.length?"disabled":""}>ランダムアサインして役職確認へ</button></div>`);
+ document.querySelectorAll("[data-ac]").forEach(el=>el.onchange=()=>{
+   S.assignCounts[el.dataset.ac]=Math.max(0,Math.min(S.players.length,+el.value||0));assign();
+ });
+ document.getElementById("back").onclick=()=>go("roles");
+ document.getElementById("startAssign").onclick=()=>{
+   const pool=[];
+   for(const [team] of teams){
+     const n=+S.assignCounts[team]||0,rs=available[team];
+     for(let i=0;i<n;i++)pool.push(rs[Math.floor(Math.random()*rs.length)].id);
+   }
+   shuffle(pool);startWithPool(pool);
+ };
+}
+
 function customScreen(editId=null){
  const customs=S.roles.filter(r=>!BASE.some(b=>b.id===r.id));
  const editing=editId?S.roles.find(r=>r.id===editId):null;
  shell(editing?"⚙️ オリジナル役職を編集":"⚙️ オリジナル役職作成",`
+ <div class="row"><button type="button" class="secondary" id="helpCustom">📖 役職作成ヘルプ</button></div>
  <div class="card">
   <div class="section-title"><h3>① 基本情報</h3></div>
   <div class="grid two">
@@ -372,6 +471,8 @@ function customScreen(editId=null){
  }));
  const backHome=document.getElementById("back");
  if(backHome) backHome.addEventListener("click",ev=>{ev.preventDefault();go("home")});
+ const helpCustom=document.getElementById("helpCustom");
+ if(helpCustom) helpCustom.addEventListener("click",ev=>{ev.preventDefault();go("help")});
 }
 function saveCustoms(){localStorage.setItem("jinro_custom_roles",JSON.stringify(S.roles.filter(r=>!BASE.some(b=>b.id===r.id))))}
 
@@ -385,7 +486,7 @@ function game(){
 function availableAbilities(playerId,trigger){
  const r=role(playerId);if(!r)return[];
  return r.abilities.filter((a,i)=>{
-   if(a.trigger!==trigger||a.effect==="none"||S.sealed[playerId])return false;
+   if(a.trigger!==trigger||a.effect==="none"||EFFECTS[a.effect]?.passive||S.sealed[playerId])return false;
    const key=playerId+":"+i;
    const used=S.actions[key]?.used||0;
    // 「無制限」はゲーム全体ではなく、1夜ごとの使用制限なし。
@@ -431,7 +532,6 @@ function processGameStartForPlayer(p){
      }else if(a.effect==="reveal_all_teams" || (a.effect==="divine_team"&&a.target==="all")){
        notes.push({title:"👁️ ゲーム開始時の能力",html:all.map(t=>`<div><b>${esc(t.name)}</b>：${esc(role(t.id)?.team||"不明")}</div>`).join("")});
      }else if(a.effect==="self_eliminate")killPlayer(p.id,"ゲーム開始時の能力");
-     else if(a.effect==="vote_weight_plus")p.voteBonus=(p.voteBonus||0)+1;
    });
  }
  const next=()=>nightAbilityScreen(p);
@@ -464,7 +564,7 @@ function nightChooseTarget(p,a){
  else if(a.target==="random_player")targets=[...S.players];
  else if(a.target==="all")targets=[...nightTargetable()];
  else targets=nightTargetable().filter(t=>t.id!==p.id);
- if(a.effect==="self_eliminate"||a.effect==="vote_weight_plus")targets=[p];
+ if(a.effect==="self_eliminate")targets=[p];
  if(["random_alive","random_player"].includes(a.target)){
    targets=[targets[Math.floor(Math.random()*targets.length)]].filter(Boolean);
  }
